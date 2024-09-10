@@ -14,3 +14,11 @@ flash infer 설치
 FlagEmbedding 설치
 
 `pip install git+https://github.com/FlagOpen/FlagEmbedding.git`
+
+## Quickstart
+
+vllm 실행
+`run_vllm.sh`
+
+api 서버 실행
+`python app.py`
