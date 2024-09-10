@@ -18,7 +18,9 @@ FlagEmbedding 설치
 ## Quickstart
 
 vllm 실행
+
 `run_vllm.sh`
 
 api 서버 실행
+
 `python app.py`
