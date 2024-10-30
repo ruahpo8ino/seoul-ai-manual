@@ -22,6 +22,7 @@ vllm 서버 실행
 `run_vllm.sh`
 
 embedding/reranker 서버 실행
+
 `python embedding_service/embedding.py`
 
 api 서버 실행
