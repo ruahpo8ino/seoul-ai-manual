@@ -24,3 +24,16 @@ vllm 실행
 api 서버 실행
 
 `python app.py`
+
+## Sample
+```
+curl -X 'POST' \
+  'http://localhost:2222/chat' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "category": 0,
+    "parent_id": "",
+    "query": "카카오톡 설치 어떻게 해?"
+}'
+```

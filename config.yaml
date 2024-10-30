@@ -1,12 +1,13 @@
 model:
     embed:
-        model_name: BAAI/bge-m3
+        api: http://localhost:2202/embedding
+        max_len: 4096
     rerank:
-        model_name: BAAI/bge-reranker-v2-m3
-        sim_top_k: 2
+        api: http://localhost:2202/rerank
+        top_n: 2
     llm:
-        api: http://localhost:8000/generate
-        max_new_tokens: 8192
+        api: http://localhost:2201/generate
+        max_new_tokens: 1024
         temperature: 0
         dir: /workspace/backup/local_model/gemma-2-9b-it/
 
@@ -16,17 +17,35 @@ logging:
     file: "logs/seoul-ai-manual_gemma-2-9b-it.log"
 
 qdrant:
-    host: 114.110.128.123
+    host: qdrant
     port: 6333
 
 redis:
-    host: localhost
+    host: redis
     port: 6379
     db: 0
     password: null
 
 engine:
-    collection: "seoul"
+    collections:
+        - "seoul_manual_0_241026" # category 0
+        - "seoul_manual_1_241026" # category 1
+        - "seoul_manual_2_241026"
+        - "seoul_manual_3_241026"
+        - "seoul_manual_4_241026"
+        - "seoul_manual_5_241026"
+        - "seoul_manual_6_241026"
+        - "seoul_manual_7_241026"
+        - "seoul_manual_8_241026"
+        - "seoul_manual_9_241026"
+        - "seoul_manual_10_241026"
+        - "seoul_manual_11_241026"
+        - "seoul_manual_0_241026" # 예산편성기준 추후 추가
+        - "seoul_manual_13_241026"
+        - "seoul_manual_14_241026"
+        - "seoul_manual_15_241026"
+        - "seoul_manual_16_241026"
+        - "seoul_manual_17_241026"
     template:
         context: |
             아래에 문맥 정보가 있습니다.
@@ -48,4 +67,4 @@ engine:
             위의 대화를 기반으로 현재 사용자의 새 질문을 condensed question으로 생성하세요.
             condensed_question:
     sim_top_k: 10
-    sim_cutoff: -1
+    sim_cutoff: 0.5

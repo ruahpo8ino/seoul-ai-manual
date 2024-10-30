@@ -2,13 +2,13 @@ import os
 import qdrant_client
 from box import Box
 from transformers import AutoTokenizer
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.vllm import VllmServer
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.schema import QueryBundle, MetadataMode
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from llama_index.postprocessor.flag_embedding_reranker import FlagEmbeddingReranker
+from embedding_reranker.huggingface import HuggingFaceEmbedding
+from embedding_reranker.flag_embedding_reranker import FlagEmbeddingReranker
 from llama_index.core import (
     PromptTemplate,
     get_response_synthesizer,
@@ -18,10 +18,6 @@ from llama_index.core import (
 from config_manager import ConfigLoader
 from loguru import logger
 
-# 환경 변수 설정
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-os.environ["HF_HOME"] = "/workspace/backup/model/"
-
 class QueryEngineSetup:
     """
     쿼리 엔진을 초기화하고 설정하는 클래스입니다.
@@ -30,7 +26,7 @@ class QueryEngineSetup:
     쿼리 엔진 객체를 생성하는 역할을 합니다.
     """
 
-    def __init__(self):
+    def __init__(self, collection):
         # Load config using ConfigLoader
         config_loader = ConfigLoader()
         self.config = config_loader.get_config()
@@ -39,6 +35,7 @@ class QueryEngineSetup:
         self.logging = self.config.logging
         self.qdrant = self.config.qdrant
         self.engine = self.config.engine
+        self.collection = collection
         self.tokenizer = AutoTokenizer.from_pretrained(self.model.llm.dir)
 
         # Initialize components
@@ -49,7 +46,7 @@ class QueryEngineSetup:
 
     def _initialize_embedding_model(self):
         """HuggingFace 임베딩 모델을 초기화합니다."""
-        self.embed_model = HuggingFaceEmbedding(model_name=self.model.embed.model_name)
+        self.embed_model = HuggingFaceEmbedding(model_name=self.model.embed.api, max_length=self.model.embed.max_len)
         Settings.embed_model = self.embed_model
 
     def _initialize_llm(self):
@@ -64,13 +61,13 @@ class QueryEngineSetup:
     def _initialize_vector_store(self):
         """Qdrant 벡터 스토어를 초기화합니다."""
         self.client = qdrant_client.QdrantClient(url=self.qdrant.host, port=self.qdrant.port)
-        self.vector_store = QdrantVectorStore(client=self.client, collection_name=self.engine.collection)
+        self.vector_store = QdrantVectorStore(client=self.client, collection_name=self.collection)
         self.index = VectorStoreIndex.from_vector_store(vector_store=self.vector_store)
 
     def _initialize_query_engine(self):
         """쿼리 엔진과 관련된 컴포넌트들을 초기화하고 설정합니다."""
         self.retriever = self.index.as_retriever(similarity_top_k=self.engine.sim_top_k)
-        reranker = FlagEmbeddingReranker(model=self.model.rerank.model_name, top_n=self.model.rerank.sim_top_k)
+        reranker = FlagEmbeddingReranker(model=self.model.rerank.api, top_n=self.model.rerank.top_n)
         sim_processor = SimilarityPostprocessor(similarity_cutoff=self.engine.sim_cutoff)
         postprocessors = [sim_processor, reranker]
 
