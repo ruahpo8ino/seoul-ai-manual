@@ -1,14 +1,19 @@
 import json
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from query_engine import QueryEngineSetup, get_response, get_condensed_question
 from log_manager import configure_logging, log_and_store_conversation, get_chat_history
+from llama_index.core.schema import QueryBundle, MetadataMode
+from llama_index.core.llms import ChatMessage
 from asgi_correlation_id import CorrelationIdMiddleware
 from asgi_correlation_id import correlation_id
 from loguru import logger
 from contextlib import asynccontextmanager
 from more_itertools import peekable
+from typing import List
+import re
+import json
 
 # FastAPI 앱 초기화
 @asynccontextmanager
@@ -49,6 +54,7 @@ class Chat(BaseModel):
     parent_id: str = None
     query: str
 
+
 @app.post("/chat")
 async def chat_manual(chat: Chat, request: Request):
     """
@@ -82,18 +88,25 @@ async def chat_manual(chat: Chat, request: Request):
     
     # 응답 생성 및 로그 저장을 한 번에 처리
     response, source_nodes = get_response(condensed_question, query_engine_setup, chat_history)
+    #print(response)
+
+    
+    
     
     def response_generator(response, source_nodes):
         metadata = [{
             "source": node.text.split("\n")[0],
             "score": node.score,
-            "filename": node.metadata["file_name"].split(".")[0],
+            "filename": node.metadata["file_name"].split(".pdf")[0],
+            "page_number": node.metadata["page_number"]
         } for node in source_nodes]
         gen = peekable(response)
         for token in gen:
             if gen.peek(None) is None:
                 log_and_store_conversation(condensed_question, result, parent_id)
-            result = str(token).split("<start_of_turn>model")[-1].strip()
+                print(metadata)
+            result = str(token).split("assistant:")[-1].strip()
+            #result = str(token)
             # yield json.dumps({"text": result, "metadata": metadata}).encode() + "\\u0000".encode() + "\n".encode()
             # res = json.dumps({"metadata": metadata, "text": result, "id": chat_id})
             res = json.dumps({"metadata": metadata, "text": result})

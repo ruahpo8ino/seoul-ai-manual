@@ -1,15 +1,18 @@
 model:
     embed:
+        name: jinaai/jina-embeddings-v3
         api: http://localhost:2202/embedding
         max_len: 4096
     rerank:
+        name: "BAAI/bge-reranker-v2-m3"
         api: http://localhost:2202/rerank
-        top_n: 2
+        top_n: 10
     llm:
-        api: http://localhost:2201/generate
+        api: "http://211.115.71.18:11434/v1"
         max_new_tokens: 1024
         temperature: 0
-        dir: /workspace/backup/local_model/gemma-2-9b-it/
+        name: "gemma2:9b-instruct-q4_K_M"
+        dir: /workspace/data/local_model/gemma-2-9b-it/
 
 logging:
     level: 20
@@ -28,24 +31,30 @@ redis:
 
 engine:
     collections:
-        - "seoul_manual_0_241026" # category 0
-        - "seoul_manual_1_241026" # category 1
-        - "seoul_manual_2_241026"
-        - "seoul_manual_3_241026"
-        - "seoul_manual_4_241026"
-        - "seoul_manual_5_241026"
-        - "seoul_manual_6_241026"
-        - "seoul_manual_7_241026"
-        - "seoul_manual_8_241026"
-        - "seoul_manual_9_241026"
-        - "seoul_manual_10_241026"
-        - "seoul_manual_11_241026"
-        - "seoul_manual_0_241026" # 예산편성기준 추후 추가
-        - "seoul_manual_13_241026"
-        - "seoul_manual_14_241026"
-        - "seoul_manual_15_241026"
-        - "seoul_manual_16_241026"
-        - "seoul_manual_17_241026"
+        - "seoul_manual_0_250226" # 전체
+        - "seoul_manual_1_250226" # 계약
+        - "seoul_manual_2_250226" # 다문화
+        - "seoul_manual_3_250226" # 예산
+        - "seoul_manual_4_250226" # 보육
+        #- "seoul_manual_0_250220_openai_0" # 전체
+        #- "seoul_manual_1_250220_openai_1" # 계약
+        #- "seoul_manual_2_250220_openai_2" # 다문화
+        #- "seoul_manual_3_250220_openai_3" # 예산
+        #- "seoul_manual_4_241026"
+        #- "seoul_manual_5_241026"
+        #- "seoul_manual_6_241026"
+        #- "seoul_manual_7_241026"
+        #- "seoul_manual_8_241026"
+        #- "seoul_manual_9_241026"
+        #- "seoul_manual_10_241026"
+        #- "seoul_manual_11_241026"
+        #- "seoul_manual_0_241026" # 예산편성기준 추후 추가
+        #- "seoul_manual_13_241026"
+        #- "seoul_manual_14_241026"
+        #- "seoul_manual_15_241026"
+        #- "seoul_manual_16_241026"
+        #- "seoul_manual_17_241026"
+        #- "test1"
     template:
         context: |
             아래에 문맥 정보가 있습니다.
@@ -66,5 +75,21 @@ engine:
             ---------------------------
             위의 대화를 기반으로 현재 사용자의 새 질문을 condensed question으로 생성하세요.
             condensed_question:
-    sim_top_k: 10
-    sim_cutoff: 0.5
+        s2a: |
+            다음은 문맥 정보입니다:
+            ----------------------------
+            {context_str}
+            ----------------------------
+            사용자의 질문이 주어졌을 때, 관련된 문맥의 번호를 JSON 형식으로 반환하세요.
+            
+            ### 입력 데이터
+            1. 문맥 리스트: 위에서 제공된 문맥 정보
+            2. 사용자의 질문: {query_str}
+            
+            ### 출력 형식:
+            ```json
+            {{
+              "related_contexts": [1, 2, 3]
+            }}
+    sim_top_k: 20
+    sim_cutoff: 0.3

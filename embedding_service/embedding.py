@@ -1,4 +1,7 @@
 # embedding.py
+import os
+os.environ["HF_HOME"] = "/workspace/data/model/"
+os.environ["LLAMA_INDEX_CACHE_DIR"] = "/workspace/data/model/hub"
 from typing import List, Union
 from fastapi import FastAPI
 import torch
@@ -10,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from FlagEmbedding import BGEM3FlagModel
-from FlagEmbedding.flag_reranker import FlagReranker
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from FlagEmbedding import FlagReranker
 from logger import config_logger
 
 app = FastAPI(debug=True)
@@ -42,18 +46,19 @@ class Node:
         assert model_type in ["embedding", "reranker"], "Invalid model type specified."
         self.model_type = model_type
         if model_type == "embedding":
-            self.model = BGEM3FlagModel(model_path, device=device_str)
+            self.model = HuggingFaceEmbedding(model_path, device=device_str, trust_remote_code=True)
         else:
             self.model = FlagReranker(model_path, use_fp16=False, device=device_str)
 
     def _embedding(self, query: list) -> torch.Tensor:
         """Generate embeddings for each query in the list using the embedding model."""
-        assert isinstance(self.model, BGEM3FlagModel), "Embedding called on a reranker node."
-        return self.model.encode(query)['dense_vecs']
-
+        #assert isinstance(self.model, BGEM3FlagModel), "Embedding called on a reranker node."
+        #return self.model.encode(query)['dense_vecs']
+        return self.model.get_text_embedding_batch(query)
+        
     def _rerank(self, data: list) -> list:
         """Rerank the list of queries using the reranker model."""
-        return self.model.compute_score(data)
+        return self.model.compute_score_single_gpu(data)
 
     def __call__(self, query: list) -> torch.Tensor | list:
         """Process the query using the appropriate model based on the node type."""
@@ -78,7 +83,10 @@ class ModelCluster:
     """
 
     def __init__(self, model_path: str, devices: List[str], model_type: str):
-        assert model_type in ['embedding', 'rzlist:
+        assert model_type in ['embedding', 'reranker']
+        self.nodes = [Node(idx, model_path, i, model_type) for idx, i in enumerate(devices)]
+
+    def __call__(self, query: list) -> torch.Tensor | list:
         """
         Process the query by finding the least loaded node and using it for inference.
 
@@ -88,19 +96,25 @@ class ModelCluster:
         Returns:
             torch.Tensor | List: The result from the model, either embeddings or reranking scores.
         """
+        order = [(i.idx, i.len_queue) for i in self.nodes]
+        order.sort(key=lambda x: x[1])
+        
         # Sort nodes by queue length (ascending)
-        order = sorted(self.nodes, key=lambda node: node.len_queue)
-        for node in order:
+        #order = sorted(self.nodes, key=lambda node: node.len_queue)
+        for idx, len_queue in order:
             try:
-                return node(query)
+                #return node(query)
+                generated = self.nodes[idx](query)
             except RuntimeError as e:
                 logger.error(f"Request failed to node {node.idx}. Trying next node. Error: {e}")
                 continue
-        raise RuntimeError("All nodes failed to process the request.")
+            self.nodes[idx].len_queue -= 1
+            return generated
+        #raise RuntimeError("All nodes failed to process the request.")
 
 def main(
-    embedding_model_path: Annotated[str, typer.Option(help="Path to embedding model")] = "/workspace/backup/local_model/bge-m3",
-    reranker_model_path: Annotated[str, typer.Option(help="Path to reranker model")] = "/workspace/backup/local_model/bge-reranker-v2-m3",
+    embedding_model_path: Annotated[str, typer.Option(help="Path to embedding model")] = "jinaai/jina-embeddings-v3",
+    reranker_model_path: Annotated[str, typer.Option(help="Path to reranker model")] = "BAAI/bge-reranker-v2-m3",
     port: Annotated[int, typer.Option(help="Port for API")] = 2202,
     embedding_device: Annotated[str, typer.Option(help="Devices for embedding model (comma-separated)")] = "0",
     reranker_device: Annotated[str, typer.Option(help="Devices for reranker model (comma-separated)")] = "0",
@@ -129,7 +143,8 @@ def main(
         origin = query.origin if query.origin else None
         logger.info(f"Embedding request received from {origin}")
         generated = embedding_nodes(query.query)
-        res = [i.tolist() for i in generated]
+        #res = [i.tolist() for i in generated]
+        res = generated
         return res
 
     @app.post("/rerank")

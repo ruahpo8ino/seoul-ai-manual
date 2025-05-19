@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import qdrant_client
 from box import Box
 from transformers import AutoTokenizer
@@ -7,8 +9,12 @@ from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.schema import QueryBundle, MetadataMode
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+#from llama_index.llms.openai_like import OpenAILike
+from llama_index.llms.openai import OpenAI
 from embedding_reranker.huggingface import HuggingFaceEmbedding
+from llama_index.embeddings.openai import OpenAIEmbedding
 from embedding_reranker.flag_embedding_reranker import FlagEmbeddingReranker
+from llama_index.core.llms import ChatMessage
 from llama_index.core import (
     PromptTemplate,
     get_response_synthesizer,
@@ -17,6 +23,8 @@ from llama_index.core import (
 )
 from config_manager import ConfigLoader
 from loguru import logger
+import re
+import json
 
 class QueryEngineSetup:
     """
@@ -46,15 +54,17 @@ class QueryEngineSetup:
 
     def _initialize_embedding_model(self):
         """HuggingFace 임베딩 모델을 초기화합니다."""
-        self.embed_model = HuggingFaceEmbedding(model_name=self.model.embed.api, max_length=self.model.embed.max_len)
+        self.embed_model = HuggingFaceEmbedding(model_name=self.model.embed.api, max_length=self.model.embed.max_len, trust_remote_code=True)
         Settings.embed_model = self.embed_model
+        #embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+        #Settings.embed_model = embed_model
 
     def _initialize_llm(self):
         """LLM 서버와 토크나이저를 초기화합니다."""
-        self.llm = VllmServer(
-            api_url=self.model.llm.api,
-            max_new_tokens=self.model.llm.max_new_tokens,
-            temperature=self.model.llm.temperature
+        self.llm = OpenAI(
+            model="gpt-4o",
+            # api_key="some key",  # uses OPENAI_API_KEY env var by default
+            temperature=0
         )
         Settings.llm = self.llm
 
@@ -70,7 +80,8 @@ class QueryEngineSetup:
         reranker = FlagEmbeddingReranker(model=self.model.rerank.api, top_n=self.model.rerank.top_n)
         sim_processor = SimilarityPostprocessor(similarity_cutoff=self.engine.sim_cutoff)
         postprocessors = [sim_processor, reranker]
-
+        #postprocessors = [sim_processor]
+        
         qa_prompt_tmpl = PromptTemplate(self.engine.template.context)
 
         self.synth = get_response_synthesizer(
@@ -95,6 +106,30 @@ class QueryEngineSetup:
         """
         return self.query_engine
 
+def get_llm_rerank(engine_setup, retrieved_nodes, query_text):
+    related_nodes = []
+    context_str = "\n\n".join(
+        [f"{{ '문맥번호' : {i}, '문맥내용' : {n.node.get_content(metadata_mode=MetadataMode.LLM).strip()}" for i, n in enumerate(retrieved_nodes)]
+    )
+    query_template = ChatMessage(role="user", content=engine_setup.engine.template.s2a.format(context_str=context_str, query_str=query_text))
+    prompt = [query_template]
+    response = engine_setup.llm.chat(prompt)
+
+    # 정규식 패턴: `{}` 포함한 내용을 추출
+    pattern = r"\{[^{}]*\}"    
+    # 첫 번째 매칭 찾기
+    match = re.search(pattern, response.message.content)
+    if match:
+        try:
+            related_contexts = json.loads(match.group())['related_contexts']
+            #print(type(related_contexts))
+            related_nodes = list(map(lambda i: retrieved_nodes[i], related_contexts))
+        except Exception as e:    # 모든 예외의 에러 메시지를 출력할 때는 Exception을 사용
+            print('예외가 발생했습니다.', e)
+            related_nodes = retrieved_nodes
+    
+    return related_nodes
+
 def get_response(query_text, engine_setup, chat_history):
     """
     쿼리를 처리하고 응답을 생성합니다.
@@ -110,29 +145,32 @@ def get_response(query_text, engine_setup, chat_history):
     """
     query_engine = engine_setup.get_query_engine()
     retrieved_nodes = query_engine.retriever.retrieve(query_text)
+    
     for postprocessor in query_engine._node_postprocessors:
         retrieved_nodes = postprocessor.postprocess_nodes(
             retrieved_nodes, query_bundle=QueryBundle(query_text)
         )
+
+    related_nodes = get_llm_rerank(engine_setup, retrieved_nodes, query_text)
     context_str = "\n\n".join(
         [n.node.get_content(metadata_mode=MetadataMode.LLM).strip() for n in retrieved_nodes]
     )
     
     if context_str:
-        query_template = {"role": "user", "content": engine_setup.engine.template.context.format(context_str=context_str, query_str=query_text)}
+        query_template = ChatMessage(role="user", content=engine_setup.engine.template.context.format(context_str=context_str, query_str=query_text))
     else:
-        query_template = {"role": "user", "content": engine_setup.engine.template.no_context.format(query_str=query_text)}
+        query_template = ChatMessage(role="user", content=engine_setup.engine.template.no_context.format(query_str=query_text))
     # 멀티턴 대화로 처리 
     if chat_history:
         chat_history.append(query_template)
         prompt = chat_history
     else:
         prompt = [query_template]
-    prompt = engine_setup.tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
-    
-    response = engine_setup.llm.stream_complete(prompt)
+    #prompt = engine_setup.tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+    print(prompt)
+    response = engine_setup.llm.stream_chat(prompt)
 
-    return response, retrieved_nodes
+    return response, related_nodes
 
 def get_condensed_question(chat_history, current_query, engine_setup):
     """
@@ -160,4 +198,3 @@ def get_condensed_question(chat_history, current_query, engine_setup):
     condensed_question = engine_setup.llm.complete(condense_prompt).text.split("condensed_question:")[-1].strip()
     
     return condensed_question
-
